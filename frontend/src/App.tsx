@@ -1,122 +1,275 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import { useEffect, useMemo, useState } from 'react';
+import './App.css';
+import MediaCard from './components/MediaCard';
+import MediaFormModal, { type MediaFormValues } from './components/MediaFormModal';
+import SearchBar from './components/SearchBar';
+import StatusFilter from './components/StatusFilter';
+import {
+  createMedia,
+  createViewer,
+  deleteMedia,
+  deleteViewer,
+  getMedia,
+  getViewers,
+  updateMedia,
+  type Media,
+  type Viewer,
+  type WatchStatus,
+} from './api';
+
+const EMPTY_FORM: MediaFormValues = {
+  title: '',
+  viewer_id: 0,
+  status: 'unwatched',
+  rating: null,
+  date_watched: '',
+  comments: '',
+  stop_reason: '',
+};
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [media, setMedia] = useState<Media[]>([]);
+  const [viewers, setViewers] = useState<Viewer[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<WatchStatus | 'all'>('all');
+  const [viewerFilter, setViewerFilter] = useState<number | 'all'>('all');
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingMedia, setEditingMedia] = useState<Media | null>(null);
+  const [viewerDraft, setViewerDraft] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const viewerMap = useMemo(
+    () => Object.fromEntries(viewers.map((viewer) => [viewer.id, viewer.name])),
+    [viewers],
+  );
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const [viewerResponse, mediaResponse] = await Promise.all([
+        getViewers(),
+        getMedia({
+          q: searchQuery,
+          status: statusFilter === 'all' ? '' : statusFilter,
+          viewer_id: viewerFilter === 'all' ? '' : viewerFilter,
+        }),
+      ]);
+
+      setViewers(viewerResponse);
+      setMedia(mediaResponse);
+      setError(null);
+    } catch (loadError) {
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : 'Unable to load the movie tracker right now.',
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadData();
+  }, [searchQuery, statusFilter, viewerFilter]);
+
+  const handleOpenCreate = () => {
+    setEditingMedia(null);
+    setIsModalOpen(true);
+  };
+
+  const handleOpenEdit = (item: Media) => {
+    setEditingMedia(item);
+    setIsModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setEditingMedia(null);
+  };
+
+  const handleSubmit = async (values: MediaFormValues) => {
+    if (editingMedia) {
+      await updateMedia(editingMedia.id, values);
+    } else {
+      await createMedia(values);
+    }
+
+    await loadData();
+    handleCloseModal();
+  };
+
+  const handleDelete = async (mediaId: number) => {
+    const confirmed = window.confirm('Remove this title from your tracker?');
+    if (!confirmed) {
+      return;
+    }
+
+    await deleteMedia(mediaId);
+    setMedia((current) => current.filter((item) => item.id !== mediaId));
+  };
+
+  const handleAddViewer = async () => {
+    const trimmed = viewerDraft.trim();
+    if (!trimmed) {
+      setError('Viewer name cannot be blank.');
+      return;
+    }
+
+    try {
+      await createViewer(trimmed);
+      setViewerDraft('');
+      setError(null);
+      await loadData();
+    } catch (createError) {
+      setError(
+        createError instanceof Error
+          ? createError.message
+          : 'Unable to create viewer.',
+      );
+    }
+  };
+
+  const handleDeleteViewer = async (viewerId: number) => {
+    const viewer = viewers.find((entry) => entry.id === viewerId);
+    if (!viewer) {
+      return;
+    }
+
+    const confirmed = window.confirm(`Delete viewer “${viewer.name}”?`);
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await deleteViewer(viewerId);
+      if (viewerFilter === viewerId) {
+        setViewerFilter('all');
+      }
+      await loadData();
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : 'Unable to delete viewer.',
+      );
+    }
+  };
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
+    <div className="dashboard-shell">
+      <header className="dashboard-header">
         <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
+          <p className="eyebrow">Watchlist dashboard</p>
+          <h1>NightWatch Tracker</h1>
         </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
+        <button type="button" className="primary-button" onClick={handleOpenCreate}>
+          + Add title
         </button>
+      </header>
+
+      <section className="toolbar">
+        <SearchBar value={searchQuery} onChange={setSearchQuery} />
+        <StatusFilter
+          status={statusFilter}
+          viewerId={viewerFilter}
+          viewers={viewers}
+          onStatusChange={setStatusFilter}
+          onViewerChange={setViewerFilter}
+        />
       </section>
 
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
+      <section className="viewer-manager" aria-label="Viewer manager">
+        <div className="viewer-manager-header">
+          <label className="filter-label" htmlFor="viewer-name-input">
+            Manage viewers
+          </label>
         </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
+        <div className="viewer-manager-row">
+          <input
+            id="viewer-name-input"
+            className="search-input"
+            type="text"
+            value={viewerDraft}
+            onChange={(event) => setViewerDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                void handleAddViewer();
+              }
+            }}
+            placeholder="Add viewer name"
+          />
+          <button type="button" className="primary-button" onClick={() => void handleAddViewer()}>
+            + Add viewer
+          </button>
+        </div>
+
+        <div className="viewer-chip-list">
+          {viewers.length === 0 ? (
+            <span className="viewer-empty">No viewers yet.</span>
+          ) : (
+            viewers.map((viewer) => (
+              <span key={viewer.id} className="viewer-chip">
+                {viewer.name}
+                <button
+                  type="button"
+                  className="viewer-delete-button"
+                  onClick={() => void handleDeleteViewer(viewer.id)}
+                  aria-label={`Delete viewer ${viewer.name}`}
                 >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
+                  Remove
+                </button>
+              </span>
+            ))
+          )}
         </div>
       </section>
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+      {error ? <div className="status-banner error">{error}</div> : null}
+
+      <section className="media-grid" aria-live="polite">
+        {loading ? (
+          <div className="empty-state">Loading your watchlist…</div>
+        ) : media.length === 0 ? (
+          <div className="empty-state">
+            No titles match your filters yet. Try a different search or add a new record.
+          </div>
+        ) : (
+          media.map((item) => (
+            <MediaCard
+              key={item.id}
+              media={item}
+              viewerName={viewerMap[item.viewer_id] ?? 'Unknown viewer'}
+              onEdit={() => handleOpenEdit(item)}
+              onDelete={() => void handleDelete(item.id)}
+            />
+          ))
+        )}
+      </section>
+
+      <MediaFormModal
+        open={isModalOpen}
+        mode={editingMedia ? 'edit' : 'create'}
+        viewers={viewers}
+        initialData={
+          editingMedia
+            ? {
+                title: editingMedia.title,
+                viewer_id: editingMedia.viewer_id,
+                status: editingMedia.status,
+                rating: editingMedia.rating,
+                date_watched: editingMedia.date_watched ?? '',
+                comments: editingMedia.comments ?? '',
+                stop_reason: editingMedia.stop_reason ?? '',
+              }
+            : EMPTY_FORM
+        }
+        onClose={handleCloseModal}
+        onSubmit={handleSubmit}
+      />
+    </div>
+  );
 }
 
-export default App
+export default App;
